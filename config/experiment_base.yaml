@@ -1,0 +1,8 @@
+﻿target: pass_fail
+random_seed: 42
+test_size: 0.2
+paths:
+  raw: data/raw
+  interim: data/interim
+  processed: data/processed
+  reports: reports

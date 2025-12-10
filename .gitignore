@@ -1,0 +1,12 @@
+.venv/
+__pycache__/
+*.pyc
+.DS_Store
+
+# Optional (recommended)
+data/processed/
+models/*.joblib
+
+# Keep or ignore reports depending on your teacher preference
+# reports/tables/
+# reports/figures/

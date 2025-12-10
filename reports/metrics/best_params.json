@@ -1,0 +1,32 @@
+{
+  "Logistic Regression": {
+    "solver": "lbfgs",
+    "C": 0.49417133613238334
+  },
+  "Decision Tree": {
+    "min_samples_split": 19,
+    "min_samples_leaf": 18,
+    "max_depth": 21,
+    "criterion": "log_loss"
+  },
+  "Random Forest": {
+    "n_estimators": 350,
+    "min_samples_split": 13,
+    "min_samples_leaf": 10,
+    "max_features": null,
+    "max_depth": 8
+  },
+  "SVM": {
+    "kernel": "linear",
+    "gamma": "auto",
+    "C": 0.655128556859551
+  },
+  "XGBoost": {
+    "subsample": 0.85,
+    "reg_lambda": 23.357214690901213,
+    "n_estimators": 500,
+    "max_depth": 10,
+    "learning_rate": 0.019999999999999997,
+    "colsample_bytree": 0.75
+  }
+}

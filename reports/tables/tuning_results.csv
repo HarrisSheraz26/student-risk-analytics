@@ -1,0 +1,6 @@
+Model,Best_CV_PR_AUC,Best_Model_Path
+Random Forest,0.9926813037727349,C:\Users\Harris.HE19211\OneDrive - RTC Education Ltd\Desktop\code projects\student-risk-analytics\models\tuned_models\random_forest_tuned.joblib
+XGBoost,0.9924715463487939,C:\Users\Harris.HE19211\OneDrive - RTC Education Ltd\Desktop\code projects\student-risk-analytics\models\tuned_models\xgboost_tuned.joblib
+SVM,0.9906176518902639,C:\Users\Harris.HE19211\OneDrive - RTC Education Ltd\Desktop\code projects\student-risk-analytics\models\tuned_models\svm_tuned.joblib
+Decision Tree,0.9905616636918108,C:\Users\Harris.HE19211\OneDrive - RTC Education Ltd\Desktop\code projects\student-risk-analytics\models\tuned_models\decision_tree_tuned.joblib
+Logistic Regression,0.9899773120684582,C:\Users\Harris.HE19211\OneDrive - RTC Education Ltd\Desktop\code projects\student-risk-analytics\models\tuned_models\logistic_regression_tuned.joblib

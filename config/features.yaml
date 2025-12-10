@@ -1,0 +1,34 @@
+﻿numeric:
+  - age
+  - Medu
+  - Fedu
+  - traveltime
+  - studytime
+  - failures
+  - famrel
+  - freetime
+  - goout
+  - Dalc
+  - Walc
+  - health
+  - absences
+  - G1
+  - G2
+categorical:
+  - school
+  - sex
+  - address
+  - famsize
+  - Pstatus
+  - Mjob
+  - Fjob
+  - reason
+  - guardian
+  - schoolsup
+  - famsup
+  - paid
+  - activities
+  - nursery
+  - higher
+  - internet
+  - romantic

@@ -1,0 +1,5 @@
+{
+  "mode": "recall_at",
+  "value": 0.8,
+  "threshold": 0.07
+}

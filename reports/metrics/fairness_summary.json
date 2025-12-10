@@ -1,0 +1,6 @@
+{
+  "decision_threshold": 0.5,
+  "demographic_parity_diff(ppr_span)": 0.0561342592592593,
+  "equal_opportunity_diff(tpr_span)": 0.02123922069626316,
+  "fpr_diff(fpr_span)": 0.10136452241715399
+}
