@@ -1,67 +1,212 @@
-\"\"\"Benchmarking module - compares multiple ML models using 5-fold cross-validation
-on the training data to identify best-performing baseline models.\n\"\"\"\nimport numpy as np\nimport pandas as pd\nimport matplotlib.pyplot as plt\n\nfrom sklearn.model_selection import StratifiedKFold, cross_validate\nfrom sklearn.linear_model import LogisticRegression\nfrom sklearn.tree import DecisionTreeClassifier\nfrom sklearn.ensemble import RandomForestClassifier\nfrom sklearn.svm import SVC\n\nfrom sklearn.metrics import (\n    make_scorer,\n    accuracy_score,\n    f1_score,\n    roc_auc_score,\n    average_precision_score,\n    roc_curve,\n)\n\n# Optional XGBoost - gracefully handle if not installed\ntry:\n    from xgboost import XGBClassifier\n    HAS_XGB = True\nexcept ImportError:\n    HAS_XGB = False\n\nfrom src.common.utils import load_yaml, project_path\n\n\ndef main():\n    \"\"\"Benchmark all models using 5-fold stratified cross-validation:\n    1. Load preprocessed training data\n    2. Initialize multiple model types (LR, DT, RF, SVM, XGB)\n    3. Run cross-validation with multiple scoring metrics\n    4. Generate model comparison table and ROC curve visualization\n    5. Save results to reports directory\n    \"\"\""
-    # Load configuration and data paths
-    cfg = load_yaml("config/experiment_base.yaml")
-    processed = project_path(cfg["paths"]["processed"])
-    reports = project_path(cfg["paths"]["reports"])
+"""
+Benchmarking module - compares multiple ML models using 5-fold cross-validation.
 
-    train_path = processed / "train.csv"
-    df = pd.read_csv(train_path)
+Outputs:
+- reports/tables/model_comparison.csv
+- reports/figures/roc_comparison.png
 
-    if "__target__" not in df.columns:
-        raise ValueError(
-            "Expected a '__target__' column in processed/train.csv. "
-            "Make sure you have run src/data/preprocess.py first."
-        )
+This module is part of the Student Risk Analytics pipeline.
+"""
 
-    # Extract features and target from training data
-    X = df.drop(columns="__target__").values
-    y = df["__target__"].values
+from __future__ import annotations
 
-    # Initialize all candidate models with baseline hyperparameters
-    models = {
-        "Logistic Regression": LogisticRegression(max_iter=2000, class_weight="balanced"),
-        "Decision Tree": DecisionTreeClassifier(random_state=42),
-        "Random Forest": RandomForestClassifier(random_state=42),
-        "SVM": SVC(probability=True, random_state=42),
-    }
+import warnings
+from pathlib import Path
+from typing import Dict, Optional
 
-    if HAS_XGB:
-        models["XGBoost"] = XGBClassifier(eval_metric="logloss", random_state=42)
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
 
-    # Define scoring metrics: accuracy, F1, ROC-AUC, and Precision-Recall AUC
-    scoring = {
-    "accuracy": "accuracy",
-    "f1": "f1",
-    "roc_auc": "roc_auc",
-    "pr_auc": "average_precision",
-    }
+from sklearn.model_selection import StratifiedKFold, cross_validate, cross_val_predict
+from sklearn.metrics import roc_auc_score, roc_curve
+from sklearn.linear_model import LogisticRegression
+from sklearn.tree import DecisionTreeClassifier
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.svm import SVC
 
-    # Setup 5-fold stratified cross-validation
-    cv = StratifiedKFold(
-        n_splits=5,
-        shuffle=True,
-        random_state=cfg.get("random_seed", 42)
+from src.common.utils import load_yaml, project_path
+
+
+def infer_target_column(df: pd.DataFrame) -> str:
+    """
+    Infer target column name from common conventions used in this project.
+    """
+    candidates = [
+        "__target__",
+        "pass_fail",
+        "target",
+        "label",
+        "at_risk",
+        "risk",
+        "y",
+        "G3",  # common in student performance datasets
+    ]
+    for c in candidates:
+        if c in df.columns:
+            return c
+    raise ValueError(
+        "Could not infer target column. Expected one of: "
+        "__target__/pass_fail/target/label/at_risk/risk/y or G3."
     )
 
-    results = []
+
+def build_models(random_state: int = 42) -> Dict[str, object]:
+    """
+    Build baseline models for comparison.
+    """
+    models: Dict[str, object] = {
+        "Logistic Regression": LogisticRegression(
+            max_iter=2000, n_jobs=None, random_state=random_state
+        ),
+        "Decision Tree": DecisionTreeClassifier(random_state=random_state),
+        "Random Forest": RandomForestClassifier(
+            n_estimators=300,
+            random_state=random_state,
+            n_jobs=-1,
+        ),
+        # probability=True keeps things consistent for ROC/PR utilities
+        "SVM": SVC(kernel="rbf", probability=True, random_state=random_state),
+    }
+
+    # XGBoost is optional but expected in your thesis plan
+    try:
+        from xgboost import XGBClassifier
+
+        models["XGBoost"] = XGBClassifier(
+            n_estimators=400,
+            learning_rate=0.05,
+            max_depth=4,
+            subsample=0.9,
+            colsample_bytree=0.9,
+            reg_lambda=1.0,
+            random_state=random_state,
+            eval_metric="logloss",
+            n_jobs=-1,
+        )
+    except Exception:
+        warnings.warn(
+            "xgboost not available. Skipping XGBoost in benchmark.",
+            RuntimeWarning,
+        )
+
+    return models
+
+
+def load_train_dataframe(cfg: dict) -> pd.DataFrame:
+    """
+    Load processed train.csv using config paths,
+    with a small fallback to interim/cleaned.csv if needed.
+    """
+    processed_dir = project_path(cfg["paths"]["processed"])
+    train_path = processed_dir / "train.csv"
+
+    if train_path.exists():
+        return pd.read_csv(train_path)
+
+    # fallback (should rarely be needed)
+    interim_dir = project_path(cfg["paths"].get("interim", "data/interim"))
+    cleaned_path = interim_dir / "cleaned.csv"
+    if cleaned_path.exists():
+        return pd.read_csv(cleaned_path)
+
+    raise FileNotFoundError(
+        "Could not find processed train.csv or interim cleaned.csv. "
+        "Run: python -m src.data.validate and python -m src.data.preprocess"
+    )
+
+
+def save_roc_comparison(
+    models: Dict[str, object],
+    X: pd.DataFrame,
+    y: pd.Series,
+    reports_dir: Path,
+    cv: StratifiedKFold,
+) -> None:
+    """
+    Create ROC comparison plot using cross-validated predictions.
+    """
+    fig_dir = reports_dir / "figures"
+    fig_dir.mkdir(parents=True, exist_ok=True)
+    ROC_PLOT = fig_dir / "roc_comparison.png"
+
+    plt.figure()
+
+    for name, model in models.items():
+        # Prefer predict_proba for consistency
+        method = "predict_proba"
+        try:
+            y_scores = cross_val_predict(
+                model, X, y, cv=cv, method=method, n_jobs=-1
+            )[:, 1]
+        except Exception:
+            # fallback to decision_function if needed
+            method = "decision_function"
+            y_scores = cross_val_predict(
+                model, X, y, cv=cv, method=method, n_jobs=-1
+            )
+            # decision scores may be unbounded - roc_curve handles this fine
+
+        auc = roc_auc_score(y, y_scores)
+        fpr, tpr, _ = roc_curve(y, y_scores)
+        plt.plot(fpr, tpr, label=f"{name} (AUC={auc:.3f})")
+
+    plt.plot([0, 1], [0, 1], linestyle="--", linewidth=1)
+    plt.xlabel("False Positive Rate")
+    plt.ylabel("True Positive Rate")
+    plt.title("ROC Comparison (5-fold CV)")
+    plt.legend(loc="lower right")
+    plt.tight_layout()
+    plt.savefig(ROC_PLOT, dpi=300)
+    plt.close()
+
+
+def main():
+    cfg = load_yaml("config/experiment_base.yaml")
+
+    reports_dir = project_path(cfg["paths"]["reports"])
+    tables_dir = reports_dir / "tables"
+    tables_dir.mkdir(parents=True, exist_ok=True)
+
+    df = load_train_dataframe(cfg)
+
+    target_col = infer_target_column(df)
+    X = df.drop(columns=[target_col])
+    y = df[target_col].astype(int)
+
+    random_state = int(cfg.get("random_state", 42))
+    models = build_models(random_state=random_state)
+
+    cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=random_state)
+
+    scoring = {
+        "acc": "accuracy",
+        "f1": "f1",
+        "roc_auc": "roc_auc",
+        "pr_auc": "average_precision",
+    }
 
     print("Running 5-fold CV benchmark for all models...\n")
 
-    # Train and evaluate each model using cross-validation
+    rows = []
     for name, model in models.items():
-        # Perform cross-validation and collect scores for all metrics
-        scores = cross_validate(model, X, y, cv=cv, scoring=scoring)
-
-        # Calculate mean scores across folds
+        scores = cross_validate(
+            model,
+            X,
+            y,
+            cv=cv,
+            scoring=scoring,
+            n_jobs=-1,
+            error_score="raise",
+        )
         row = {
-    "Model": name,
-    "accuracy": float(np.mean(scores["test_accuracy"])),
-    "f1": float(np.mean(scores["test_f1"])),
-    "roc_auc": float(np.mean(scores["test_roc_auc"])),
-    "pr_auc": float(np.mean(scores["test_pr_auc"])),
+            "model": name,
+            "accuracy": float(np.mean(scores["test_acc"])),
+            "f1": float(np.mean(scores["test_f1"])),
+            "roc_auc": float(np.mean(scores["test_roc_auc"])),
+            "pr_auc": float(np.mean(scores["test_pr_auc"])),
         }
-        results.append(row)
+        rows.append(row)
 
         print(
             f"[{name}] "
@@ -71,47 +216,18 @@ on the training data to identify best-performing baseline models.\n\"\"\"\nimpor
             f"pr_auc={row['pr_auc']:.3f}"
         )
 
-    # Create output directories for tables and figures
-    tables_dir = reports / "tables"
-    figures_dir = reports / "figures"
-    tables_dir.mkdir(parents=True, exist_ok=True)
-    figures_dir.mkdir(parents=True, exist_ok=True)
-
-    # Sort results by PR-AUC (primary metric) and save comparison table
-    df_results = (
-        pd.DataFrame(results)
-        .set_index("Model")
-        .sort_values("pr_auc", ascending=False)
+    results = pd.DataFrame(rows).sort_values(
+        by=["pr_auc", "roc_auc"], ascending=False
     )
-    comparison_path = tables_dir / "model_comparison.csv"
-    df_results.to_csv(comparison_path)
 
-    # Generate ROC curves for visual comparison (fit on full training data)
-    plt.figure(figsize=(8, 6))
+    out_csv = tables_dir / "model_comparison.csv"
+    results.to_csv(out_csv, index=False)
 
-    for name, model in models.items():
-        # Train each model on full training data for visualization
-        model.fit(X, y)
-        y_prob = model.predict_proba(X)[:, 1]
-        # Calculate ROC curve coordinates
-        fpr, tpr, _ = roc_curve(y, y_prob)
-        plt.plot(fpr, tpr, label=name)
-
-    # Plot random classifier baseline
-    plt.plot([0, 1], [0, 1], linestyle="--")
-    plt.title("ROC Curves - Model Comparison (Train)")
-    plt.xlabel("False Positive Rate")
-    plt.ylabel("True Positive Rate")
-    plt.legend()
-
-    # Save ROC comparison plot
-    roc_plot_path = figures_dir / "roc_comparison.png"
-    plt.savefig(roc_plot_path, dpi=300, bbox_inches="tight")
-    plt.close()
+    save_roc_comparison(models, X, y, reports_dir, cv)
 
     print("\n✅ Benchmark complete.")
-    print("✅ Model comparison table:", comparison_path)
-    print("✅ ROC comparison plot:   ", roc_plot_path)
+    print(f"✅ Model comparison table: {out_csv}")
+    print(f"✅ ROC comparison plot:    {reports_dir / 'figures' / 'roc_comparison.png'}")
 
 
 if __name__ == "__main__":
